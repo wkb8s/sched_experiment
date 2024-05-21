@@ -11,11 +11,12 @@ import matplotlib.pyplot as plt
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ExperimentConfig:
-    def __init__(self, benchmarks: List[str], iterations: int = 1, mode: str = "both"):
+    def __init__(self, benchmarks: List[str], log_path: str, iterations: int = 1, mode: str = "both"):
         self.benchmarks = benchmarks
         self.iterations = iterations
         self.mode = mode
         self.kernel_name = self.get_kernel_name()
+        self.log_path = log_path
     
     @staticmethod
     def get_kernel_name() -> str:
@@ -34,19 +35,23 @@ def create_directory(directory: str):
     else:
         logging.debug(f"Directory already exists: {directory}")
 
-def run_benchmark(benchmark: str, kernel_name: str, iterations: int) -> List[Dict[str, float]]:
+def repeat_benchmark(raw_file: str, benchmark: str, iterations: int) -> List[Dict[str,float]]:
     results = []
     for i in range(iterations):
-        try:
-            output = subprocess.check_output(f"parsecmgmt -a run -x pre -p {benchmark} -c gcc-hooks -i native", shell=True).decode()
-            logging.debug(f"Benchmark output (iteration {i + 1}): {output}")
-            
-            result = parse_output(output)
-            results.append(result)
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to run benchmark {benchmark} on iteration {i + 1}")
-            raise e
+        output = run_benchmark_once(raw_file, benchmark, i)
+        save_raw_output(raw_file, benchmark, output)
+        result = parse_output(output)
+        results.append(result)
     return results
+
+def run_benchmark_once(raw_file: str, benchmark: str, benchmark_iter: int) -> str:
+    try:
+        output = subprocess.check_output(f"parsecmgmt -a run -x pre -p {benchmark} -c gcc-hooks -i test", shell=True).decode()
+        logging.debug(f"Benchmark output (iteration {benchmark_iter + 1}): {output}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to run benchmark {benchmark} on iteration {benchmark_iter + 1}")
+        raise e
+    return output
 
 def parse_output(output: str) -> Dict[str, float]:
     result = {}
@@ -66,15 +71,21 @@ def parse_time(time_str: str) -> float:
     minutes, seconds = time_str.split('m')
     return float(minutes) * 60 + float(seconds.replace('s', ''))
 
-def write_raw_output(filename: str, results: List[Dict[str, float]]):
+def save_raw_output(filename: str, benchmark: str, output: str):
+    with open(filename, 'a') as f:
+        f.write(output)
+        f.write('\n') # add a newline character for better readability
+    logging.debug(f"Raw output written to {filename}")
+
+def save_processed_output(filename: str, benchmark: str, results: List[Dict[str, float]]):
     with open(filename, 'w') as f:
         writer = csv.writer(f)
         writer.writerow(["iteration", "total", "real", "user", "sys"])
         for i, result in enumerate(results):
             writer.writerow([i + 1, result["total"], result["real"], result["user"], result["sys"]])
-    logging.debug(f"Raw output written to {filename}")
+    logging.debug(f"Processed output written to {filename}")
 
-def write_summary_output(filename: str, results: List[Dict[str, float]]):
+def save_summary_output(filename: str, results: List[Dict[str, float]]):
     summary = {
         "total": [r["total"] for r in results],
         "real": [r["real"] for r in results],
@@ -115,26 +126,28 @@ def create_comparison_chart(results: Dict[str, Dict[str, float]], output_file: s
         logging.debug(f"Comparison chart for {category} saved to {output_file.replace('.png', f'-{category}.png')}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Benchmark Execution and Analysis Tool')
+    parser = argparse.ArgumentParser(description='PARSEC Benchmark Execution and Analysis Tool')
     parser.add_argument('benchmarks', nargs='+', help='List of benchmarks to run')
     parser.add_argument('-i', '--iterations', type=int, default=1, help='Number of iterations (default: 1)')
     parser.add_argument('-m', '--mode', choices=['run', 'analyze', 'both'], default='both', help='Execution mode (default: both)')
-    
     args = parser.parse_args()
-    config = ExperimentConfig(args.benchmarks, args.iterations, args.mode)
 
-    create_directory('runtime_experiment')
+    log_path = 'log'
+    create_directory(log_path)
+    config = ExperimentConfig(args.benchmarks, log_path, args.iterations, args.mode)
 
     benchmark_results = {}
 
     for benchmark in config.benchmarks:
-        raw_file = f"runtime_experiment/{benchmark}-{config.kernel_name}-raw.csv"
-        summary_file = f"runtime_experiment/{benchmark}-{config.kernel_name}-summary.csv"
-        comparison_file = f"runtime_experiment/{config.kernel_name}-comparison.png"
+        raw_file = f"{log_path}/{benchmark}-{config.kernel_name}-raw.txt"
+        processed_file = f"{log_path}/{benchmark}-{config.kernel_name}-processed.csv"
+        summary_file = f"{log_path}/{benchmark}-{config.kernel_name}-summary.csv"
+        comparison_file = f"{log_path}/{config.kernel_name}-comparison.png"
 
         if config.mode in ['run', 'both']:
-            results = run_benchmark(benchmark, config.kernel_name, config.iterations)
-            write_raw_output(raw_file, results)
+            results = repeat_benchmark(raw_file, benchmark, config.iterations)
+            save_processed_output(processed_file, benchmark, results)
+
             benchmark_results[benchmark] = {
                 config.kernel_name: {
                     "total": statistics.mean([r["total"] for r in results]),
@@ -146,7 +159,7 @@ def main():
 
         if config.mode in ['analyze', 'both']:
             results = []
-            with open(raw_file, 'r') as f:
+            with open(processed_file, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     results.append({
@@ -155,7 +168,7 @@ def main():
                         "user": float(row["user"]),
                         "sys": float(row["sys"])
                     })
-            write_summary_output(summary_file, results)
+            save_summary_output(summary_file, results)
 
     if config.mode in ['analyze', 'both']:
         create_comparison_chart(benchmark_results, comparison_file)
