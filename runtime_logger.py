@@ -108,7 +108,7 @@ def save_summary_output(filename: str, results: List[Dict[str, float]]):
                          statistics.stdev(summary["sys"]) if len(summary["sys"]) > 1 else 0])
     logging.debug(f"Summary output written to {filename}")
 
-def create_comparison_chart(results: Dict[str, Dict[str, float]], output_file: str):
+def create_comparison_chart(filename: str, results: Dict[str, Dict[str, float]]):
     categories = ["total", "real", "user", "sys"]
     benchmarks = list(results.keys())
     kernel_names = list(results[benchmarks[0]].keys())
@@ -126,7 +126,7 @@ def create_comparison_chart(results: Dict[str, Dict[str, float]], output_file: s
         logging.debug(f"Comparison chart for {category} saved to {output_file.replace('.png', f'-{category}.png')}")
 
 def main():
-    parser = argparse.ArgumentParser(description='PARSEC Benchmark Execution and Analysis Tool')
+    parser = argparse.ArgumentParser(description='Run benchmarks and save logs as csv files.')
     parser.add_argument('benchmarks', nargs='+', help='List of benchmarks to run')
     parser.add_argument('-i', '--iterations', type=int, default=1, help='Number of iterations (default: 1)')
     parser.add_argument('-m', '--mode', choices=['run', 'analyze', 'both'], default='both', help='Execution mode (default: both)')
@@ -136,26 +136,14 @@ def main():
     create_directory(log_path)
     config = ExperimentConfig(args.benchmarks, log_path, args.iterations, args.mode)
 
-    benchmark_results = {}
-
     for benchmark in config.benchmarks:
-        raw_file = f"{log_path}/{benchmark}-{config.kernel_name}-raw.txt"
-        processed_file = f"{log_path}/{benchmark}-{config.kernel_name}-processed.csv"
-        summary_file = f"{log_path}/{benchmark}-{config.kernel_name}-summary.csv"
-        comparison_file = f"{log_path}/{config.kernel_name}-comparison.png"
+        raw_file = f"{log_path}/{config.kernel_name}--{benchmark}-raw.txt"
+        processed_file = f"{log_path}/{config.kernel_name}--{benchmark}-processed.csv"
+        summary_file = f"{log_path}/{config.kernel_name}--{benchmark}-summary.csv"
 
         if config.mode in ['run', 'both']:
             results = repeat_benchmark(raw_file, benchmark, config.iterations)
             save_processed_output(processed_file, benchmark, results)
-
-            benchmark_results[benchmark] = {
-                config.kernel_name: {
-                    "total": statistics.mean([r["total"] for r in results]),
-                    "real": statistics.mean([r["real"] for r in results]),
-                    "user": statistics.mean([r["user"] for r in results]),
-                    "sys": statistics.mean([r["sys"] for r in results])
-                }
-            }
 
         if config.mode in ['analyze', 'both']:
             results = []
@@ -169,9 +157,6 @@ def main():
                         "sys": float(row["sys"])
                     })
             save_summary_output(summary_file, results)
-
-    if config.mode in ['analyze', 'both']:
-        create_comparison_chart(benchmark_results, comparison_file)
 
 if __name__ == '__main__':
     main()
