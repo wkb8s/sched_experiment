@@ -61,11 +61,17 @@ def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List
             bar_positions = [p + bar_width * i for p in index]
             ax.bar(bar_positions, [values[benchmark] for benchmark in benchmarks], bar_width, label=kernel_name)
 
+        plt.rcParams['ytick.direction'] = 'in'
+
         ax.set_xlabel('Benchmarks')
-        ax.set_ylabel(category.capitalize())
-        ax.set_title(f'{category.capitalize()} Benchmark Results')
+        if relative:
+            ax.set_ylabel('Improvement')
+        else:
+            ax.set_ylabel("Execution time (s)")
+        ax.set_title(f'Benchmark Results ({category.capitalize()})')
         ax.set_xticks([p + bar_width * (len(data) / 2 - 0.5) for p in index])
         ax.set_xticklabels(benchmarks, rotation=45, ha='right') # display benchmarkname in slanted form
+        ax.tick_params(bottom=False)
         ax.legend()
 
         if relative:
