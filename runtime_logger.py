@@ -11,10 +11,11 @@ import matplotlib.pyplot as plt
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ExperimentConfig:
-    def __init__(self, benchmarks: List[str], log_path: str, iterations: int = 1, mode: str = "both"):
+    def __init__(self, benchmarks: List[str], log_path: str, iterations: int = 1, mode: str = "both", inputset: str = "native"):
         self.benchmarks = benchmarks
         self.iterations = iterations
         self.mode = mode
+        self.inputset = inputset
         self.kernel_name = self.get_kernel_name()
         self.log_path = log_path
     
@@ -35,18 +36,18 @@ def create_directory(directory: str):
     else:
         logging.debug(f"Directory already exists: {directory}")
 
-def repeat_benchmark(raw_file: str, benchmark: str, iterations: int) -> List[Dict[str,float]]:
+def repeat_benchmark(raw_file: str, benchmark: str, iterations: int, inputset: str) -> List[Dict[str,float]]:
     results = []
     for i in range(iterations):
-        output = run_benchmark_once(raw_file, benchmark, i)
+        output = run_benchmark_once(raw_file, benchmark, i, inputset)
         save_raw_output(raw_file, benchmark, output)
         result = parse_output(output)
         results.append(result)
     return results
 
-def run_benchmark_once(raw_file: str, benchmark: str, benchmark_iter: int) -> str:
+def run_benchmark_once(raw_file: str, benchmark: str, benchmark_iter: int, inputset: str) -> str:
     try:
-        output = subprocess.check_output(f"parsecmgmt -a run -x pre -p {benchmark} -c gcc-hooks -i test", shell=True).decode()
+        output = subprocess.check_output(f"parsecmgmt -a run -x pre -p {benchmark} -c gcc-hooks -i {inputset}", shell=True).decode()
         logging.debug(f"Benchmark output (iteration {benchmark_iter + 1}): {output}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to run benchmark {benchmark} on iteration {benchmark_iter + 1}")
@@ -108,33 +109,17 @@ def save_summary_output(filename: str, results: List[Dict[str, float]]):
                          statistics.stdev(summary["sys"]) if len(summary["sys"]) > 1 else 0])
     logging.debug(f"Summary output written to {filename}")
 
-def create_comparison_chart(filename: str, results: Dict[str, Dict[str, float]]):
-    categories = ["total", "real", "user", "sys"]
-    benchmarks = list(results.keys())
-    kernel_names = list(results[benchmarks[0]].keys())
-
-    for category in categories:
-        for kernel_name in kernel_names:
-            values = [results[benchmark][kernel_name][category] for benchmark in benchmarks]
-            plt.bar(benchmarks, values, label=kernel_name)
-        plt.xlabel('Benchmark')
-        plt.ylabel(f'{category} time (s)')
-        plt.title(f'Benchmark Comparison: {category}')
-        plt.legend()
-        plt.savefig(output_file.replace('.png', f'-{category}.png'))
-        plt.close()
-        logging.debug(f"Comparison chart for {category} saved to {output_file.replace('.png', f'-{category}.png')}")
-
 def main():
     parser = argparse.ArgumentParser(description='Run benchmarks and save logs as csv files.')
     parser.add_argument('benchmarks', nargs='+', help='List of benchmarks to run')
-    parser.add_argument('-i', '--iterations', type=int, default=1, help='Number of iterations (default: 1)')
+    parser.add_argument('-r', '--repeat', type=int, default=1, help='Number of repetitions (default: 1)')
     parser.add_argument('-m', '--mode', choices=['run', 'analyze', 'both'], default='both', help='Execution mode (default: both)')
+    parser.add_argument('-i', '--inputset', choices=['test', 'native'], default='native', help='Input set (default: native)')
     args = parser.parse_args()
 
     log_path = 'log'
     create_directory(log_path)
-    config = ExperimentConfig(args.benchmarks, log_path, args.iterations, args.mode)
+    config = ExperimentConfig(args.benchmarks, log_path, args.repeat, args.mode, args.inputset)
 
     for benchmark in config.benchmarks:
         raw_file = f"{log_path}/{config.kernel_name}--{benchmark}-raw.txt"
@@ -142,7 +127,7 @@ def main():
         summary_file = f"{log_path}/{config.kernel_name}--{benchmark}-summary.csv"
 
         if config.mode in ['run', 'both']:
-            results = repeat_benchmark(raw_file, benchmark, config.iterations)
+            results = repeat_benchmark(raw_file, benchmark, config.iterations, config.inputset)
             save_processed_output(processed_file, benchmark, results)
 
         if config.mode in ['analyze', 'both']:
