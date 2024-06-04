@@ -65,7 +65,7 @@ def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List
         ax.set_ylabel(category.capitalize())
         ax.set_title(f'{category.capitalize()} Benchmark Results')
         ax.set_xticks([p + bar_width * (len(data) / 2 - 0.5) for p in index])
-        ax.set_xticklabels(benchmarks)
+        ax.set_xticklabels(benchmarks, rotation=45, ha='right') # display benchmarkname in slanted form
         ax.legend()
 
         if relative:
@@ -74,6 +74,7 @@ def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List
         # Create output file name
         suffix = '-relative.png' if relative else '.png'
         output_file = os.path.join(output_dir, '-'.join(benchmarks) + f'-{category}{suffix}')
+        plt.subplots_adjust(bottom=0.3)  # adjust bottom margin
         plt.savefig(output_file)
         logging.debug(f"Graph saved to {output_file}")
     except Exception as e:
