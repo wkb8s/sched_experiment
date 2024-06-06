@@ -16,16 +16,16 @@ def configure_logging(mode: str):
     else:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def get_parsecmgmt_pid() -> Optional[int]:
+def get_pid(process_name) -> Optional[int]:
     """
-    Get the PID of the 'parsecmgmt' process.
+    Get the PID from process name.
     
     Returns:
-        Optional[int]: The PID of 'parsecmgmt' if found, else None.
+        Optional[int]: The PID if found, else None.
     """
     for proc in psutil.process_iter(['pid', 'name']):
-        if proc.info['name'] == 'parsecmgmt':
-            logging.debug(f"Found parsecmgmt with PID {proc.info['pid']}")
+        if proc.info['name'] == process_name:
+            logging.debug(f"Found {process_name} with PID {proc.info['pid']}")
             return proc.info['pid']
     return None
 
@@ -36,13 +36,16 @@ def wait_for_parsecmgmt() -> int:
     Returns:
         int: The PID of 'parsecmgmt'.
     """
-    logging.info("Waiting for parsecmgmt process to start...")
-    pid = get_parsecmgmt_pid()
-    while pid is None:
-        time.sleep(1)  # Wait for 1 second before checking again
-        pid = get_parsecmgmt_pid()
-    logging.info(f"parsecmgmt process started with PID {pid}")
-    return pid
+    try:
+        logging.info("Waiting for parsecmgmt process to start...")
+        pid = get_pid('parsecmgmt')
+        while pid is None:
+            time.sleep(1)  # Wait for 1 second before checking again
+            pid = get_pid('parsecmgmt')
+        logging.info(f"parsecmgmt process started with PID {pid}")
+        return pid
+    except KeyboardInterrupt:
+        logging.info("Monitoring stopped by user.")
 
 def get_process_group(pid: int) -> List[psutil.Process]:
     """
@@ -106,9 +109,9 @@ def monitor_cpu_usage(pid: int, interval: float = 1.0, log_file: str = './log/cp
     except Exception as e:
         logging.error(f"An error occurred: {e}")
 
-def main(log_file: str = './log/cpu_usage.csv', interval: float = 1.0, mode: str = 'normal'):
+def main(log_file: str = './log/cpuusage.csv', interval: float = 1.0, mode: str = 'normal'):
     configure_logging(mode)
-    pid = get_parsecmgmt_pid()
+    pid = get_pid('parsecmgmt')
     if pid is None:
         pid = wait_for_parsecmgmt()
     monitor_cpu_usage(pid, interval, log_file)
