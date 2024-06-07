@@ -1,23 +1,25 @@
-import os
-import argparse
-import subprocess
-import logging
-import statistics
 import csv
+import logging
+import argparse
+import threading
+import subprocess
+import statistics
+import cpuusage_monitor
 from typing import List, Dict
 import matplotlib.pyplot as plt
+from utils.exectime_logging_util import *
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ExperimentConfig:
-    def __init__(self, benchmarks: List[str], log_path: str, iterations: int = 1, mode: str = "both", inputset: str = "native"):
+    def __init__(self, benchmarks: List[str], iterations: int = 1, threads: int = 1, mode: str = "both", inputset: str = "native"):
         self.benchmarks = benchmarks
         self.iterations = iterations
+        self.threads = threads
         self.mode = mode
         self.inputset = inputset
         self.kernel_name = self.get_kernel_name()
-        self.log_path = log_path
     
     @staticmethod
     def get_kernel_name() -> str:
@@ -29,25 +31,23 @@ class ExperimentConfig:
             logging.error("Failed to get kernel name")
             raise e
 
-def create_directory(directory: str):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-        logging.debug(f"Directory created: {directory}")
-    else:
-        logging.debug(f"Directory already exists: {directory}")
-
-def repeat_benchmark(raw_file: str, benchmark: str, iterations: int, inputset: str) -> List[Dict[str,float]]:
-    results = []
+def repeat_benchmark(raw_file: str, benchmark: str, config: ExperimentConfig):
+    iterations = config.iterations
+    inputset = config.inputset
     for i in range(iterations):
-        output = run_benchmark_once(raw_file, benchmark, i, inputset)
+        output = run_benchmark_once(raw_file, benchmark, i, config)
         save_raw_output(raw_file, benchmark, output)
-        result = parse_output(output)
-        results.append(result)
-    return results
 
-def run_benchmark_once(raw_file: str, benchmark: str, benchmark_iter: int, inputset: str) -> str:
+def run_benchmark_once(raw_file: str, benchmark: str, benchmark_iter: int, config: ExperimentConfig) -> str:
     try:
-        output = subprocess.check_output(f"parsecmgmt -a run -x pre -p {benchmark} -c gcc-hooks -i {inputset}", shell=True).decode()
+        inputset = config.inputset
+        threads = config.threads
+        exec_cmd = f"parsecmgmt -a run -x pre -p {benchmark} -n {threads} -c gcc-hooks -i {inputset}"
+        monitor_thread = threading.Thread(target=cpuusage_monitor.main, args=(f"./log/{config.kernel_name}--{benchmark}-cpuusage.csv", 1.0, "silent"))
+        monitor_thread.start()
+        logging.debug("Execute: " + exec_cmd)
+        output = subprocess.check_output(exec_cmd, shell=True).decode()
+        monitor_thread.join()
         logging.debug(f"Benchmark output (iteration {benchmark_iter + 1}): {output}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to run benchmark {benchmark} on iteration {benchmark_iter + 1}")
@@ -71,6 +71,34 @@ def parse_output(output: str) -> Dict[str, float]:
 def parse_time(time_str: str) -> float:
     minutes, seconds = time_str.split('m')
     return float(minutes) * 60 + float(seconds.replace('s', ''))
+
+def parse_raw_file(file_path: str) -> List[Dict[str, float]]:
+    section_delimiter = "[PARSEC] [----------    End of output    ----------]"
+    output_start_marker = "[PARSEC] [---------- Beginning of output ----------]"
+    results = []
+    with open(file_path, 'r') as file:
+        content = file.read()
+    sections = content.split(section_delimiter)
+    for section in sections:
+        if output_start_marker in section:
+            output = section.split(output_start_marker)[1].strip()
+            result = parse_output(output)
+            if result:
+                results.append(result)
+    return results
+
+def parse_processed_file(file_path: str) -> List[Dict[str, float]]:
+    results = []
+    with open(file_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            results.append({
+                "total": float(row["total"]),
+                "real": float(row["real"]),
+                "user": float(row["user"]),
+                "sys": float(row["sys"])
+            })
+    return results
 
 def save_raw_output(filename: str, benchmark: str, output: str):
     with open(filename, 'a') as f:
@@ -109,17 +137,22 @@ def save_summary_output(filename: str, results: List[Dict[str, float]]):
                          statistics.stdev(summary["sys"]) if len(summary["sys"]) > 1 else 0])
     logging.debug(f"Summary output written to {filename}")
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='Run benchmarks and save logs as csv files.')
     parser.add_argument('benchmarks', nargs='+', help='List of benchmarks to run')
     parser.add_argument('-r', '--repeat', type=int, default=1, help='Number of repetitions (default: 1)')
+    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads (default: 1)')
     parser.add_argument('-m', '--mode', choices=['run', 'analyze', 'both'], default='both', help='Execution mode (default: both)')
     parser.add_argument('-i', '--inputset', choices=['test', 'native'], default='native', help='Input set (default: native)')
-    args = parser.parse_args()
+    return parser
 
-    log_path = 'log'
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    config = ExperimentConfig(args.benchmarks, args.repeat, args.threads, args.mode, args.inputset)
+
+    log_path = get_config("log_path")
     create_directory(log_path)
-    config = ExperimentConfig(args.benchmarks, log_path, args.repeat, args.mode, args.inputset)
 
     for benchmark in config.benchmarks:
         raw_file = f"{log_path}/{config.kernel_name}--{benchmark}-raw.txt"
@@ -127,21 +160,18 @@ def main():
         summary_file = f"{log_path}/{config.kernel_name}--{benchmark}-summary.csv"
 
         if config.mode in ['run', 'both']:
-            results = repeat_benchmark(raw_file, benchmark, config.iterations, config.inputset)
-            save_processed_output(processed_file, benchmark, results)
+            delete_file(raw_file)
+            delete_file(processed_file)
+            delete_file(summary_file)
+            repeat_benchmark(raw_file, benchmark, config)
 
         if config.mode in ['analyze', 'both']:
-            results = []
-            with open(processed_file, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    results.append({
-                        "total": float(row["total"]),
-                        "real": float(row["real"]),
-                        "user": float(row["user"]),
-                        "sys": float(row["sys"])
-                    })
-            save_summary_output(summary_file, results)
+            delete_file(processed_file)
+            delete_file(summary_file)
+            raw_content = parse_raw_file(raw_file)
+            save_processed_output(processed_file, benchmark, raw_content)
+            processed_content = parse_processed_file(processed_file)
+            save_summary_output(summary_file, processed_content)
 
 if __name__ == '__main__':
     main()
