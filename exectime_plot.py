@@ -51,7 +51,21 @@ def extract_data(df: pd.DataFrame, category: str) -> float:
         logging.error(f"Error extracting data: {e}")
         return 0.0
 
-def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List[str], output_dir: str = './log', relative: bool = False):
+def extract_stdev(df: pd.DataFrame, category: str) -> float:
+    try:
+        assert not df.empty, "DataFrame is empty"
+        filtered_df = df[df['Unnamed: 0'] == 'stdev']
+        value = filtered_df[category].values[0]
+        logging.debug(f"Extracted stdev for category {category}: {value}")
+        return value
+    except AssertionError as e:
+        logging.error(f"Assertion error: {e}")
+        return 0.0
+    except Exception as e:
+        logging.error(f"Error extracting stdev: {e}")
+        return 0.0
+
+def plot_data(data: Dict[str, Dict[str, float]], stdev_data: Dict[str, Dict[str, float]], category: str, benchmarks: List[str], output_dir: str = './log', relative: bool = False):
     try:
         fig, ax = plt.subplots()
         bar_width = 0.2
@@ -59,7 +73,13 @@ def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List
 
         for i, (kernel_name, values) in enumerate(data.items()):
             bar_positions = [p + bar_width * i for p in index]
-            ax.bar(bar_positions, [values[benchmark] for benchmark in benchmarks], bar_width, label=kernel_name)
+            
+            # Only show error bars if relative is False
+            if not relative:
+                errors = [stdev_data[kernel_name][benchmark] for benchmark in benchmarks]
+                ax.bar(bar_positions, [values[benchmark] for benchmark in benchmarks], bar_width, label=kernel_name, yerr=errors, capsize=5)
+            else:
+                ax.bar(bar_positions, [values[benchmark] for benchmark in benchmarks], bar_width, label=kernel_name)
 
         plt.rcParams['ytick.direction'] = 'in'
 
@@ -70,7 +90,7 @@ def plot_data(data: Dict[str, Dict[str, float]], category: str, benchmarks: List
             ax.set_ylabel("Execution time (s)")
         ax.set_title(f'Benchmark Results ({category.capitalize()})')
         ax.set_xticks([p + bar_width * (len(data) / 2 - 0.5) for p in index])
-        ax.set_xticklabels(benchmarks, rotation=45, ha='right') # display benchmarkname in slanted form
+        ax.set_xticklabels(benchmarks, rotation=45, ha='right') # display benchmark name in slanted form
         ax.tick_params(bottom=False)
         ax.legend()
 
@@ -97,6 +117,7 @@ def main():
 
     for category in categories:
         category_data = {}
+        stdev_data = {}  # Dictionary to store standard deviation data
         min_values = {}
 
         for kernel_name in kernel_names:
@@ -104,9 +125,12 @@ def main():
                 df = read_csv_data(kernel_name, benchmark, log_dir)
                 if not df.empty:
                     value = extract_data(df, category)
+                    stdev_value = extract_stdev(df, category)
                     if kernel_name not in category_data:
                         category_data[kernel_name] = {}
+                        stdev_data[kernel_name] = {}
                     category_data[kernel_name][benchmark] = value
+                    stdev_data[kernel_name][benchmark] = stdev_value
 
         if args.relative and kernel_names:
             min_kernel = kernel_names[0]
@@ -122,7 +146,7 @@ def main():
             if min_kernel in category_data:
                 del category_data[min_kernel]
 
-        plot_data(category_data, category, args.benchmarks, log_dir, args.relative)
+        plot_data(category_data, stdev_data, category, args.benchmarks, log_dir, args.relative)
 
 if __name__ == "__main__":
     main()
