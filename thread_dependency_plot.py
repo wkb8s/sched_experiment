@@ -72,6 +72,10 @@ def plot_data(log_dir: str, data: Dict[str, Dict[str, pd.DataFrame]], benchmarks
     
     for benchmark in benchmarks:
         for mode in modes:
+            save_path = os.path.join(log_dir, 'fig_thread_dependency')
+            create_directory(save_path)
+            
+            # Plot with y-axis starting at 0
             plt.figure()
             for kernel_version, mode_data in data[benchmark].items():
                 if mode in mode_data:
@@ -83,9 +87,23 @@ def plot_data(log_dir: str, data: Dict[str, Dict[str, pd.DataFrame]], benchmarks
             plt.title(f'{benchmark} - {mode}')
             plt.legend()
             plt.grid(True)
-            save_path = log_dir + '/fig_thread_dependency'
-            create_directory(save_path)
+            plt.ylim(bottom=0)  # Set the y-axis to start from 0
             plt.savefig(f'{save_path}/{mode}_{benchmark}.png')
+            plt.close()
+            
+            # Plot with original y-axis range
+            plt.figure()
+            for kernel_version, mode_data in data[benchmark].items():
+                if mode in mode_data:
+                    df = mode_data[mode]
+                    df.sort_values(by='#threads', inplace=True)
+                    plt.plot(df['#threads'], df[mode], label=kernel_version, marker='o', color=color_map[kernel_version])
+            plt.xlabel('#threads')
+            plt.ylabel('Execution time (s)')
+            plt.title(f'{benchmark} - {mode}')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(f'{save_path}/{mode}_{benchmark}-up.png')
             plt.close()
 
 def main():
