@@ -68,20 +68,22 @@ def load_and_process_csv(filename: str) -> Tuple[pd.DataFrame, int]:
         logging.error(f"Error processing file {filename}: {e}")
         raise
 
-def plot_heatmap(df: pd.DataFrame, num_cpus: int, kernel: str, benchmark: str) -> None:
+def plot_heatmap(df: pd.DataFrame, num_cpus: int, kernel: str, benchmark: str, csv_file_path: str) -> None:
     """
-    Generates a heatmap of CPU usage over time.
+    Generates a heatmap of CPU usage over time and saves it to the directory of the CSV file.
     
     Args:
     df (pd.DataFrame): The DataFrame containing CPU usage data.
     num_cpus (int): The number of CPUs.
     kernel (str): The kernel name.
     benchmark (str): The benchmark name.
+    csv_file_path (str): The path to the original CSV file.
     """
     assert isinstance(df, pd.DataFrame), "Input must be a pandas DataFrame"
     assert isinstance(num_cpus, int) and num_cpus > 0, "Number of CPUs must be a positive integer"
     assert isinstance(kernel, str), "Kernel name must be a string"
     assert isinstance(benchmark, str), "Benchmark name must be a string"
+    assert isinstance(csv_file_path, str), "CSV file path must be a string"
     
     plt.figure(figsize=(12, num_cpus))
     
@@ -98,7 +100,10 @@ def plot_heatmap(df: pd.DataFrame, num_cpus: int, kernel: str, benchmark: str) -
     plt.yticks(np.arange(0.5, num_cpus, 1), labels=[f'CPU {i}' for i in range(num_cpus)], rotation=0)
     plt.xticks(rotation=45)
     
-    output_filename = f'./log/{kernel}--{benchmark}-cpuusage.png'
+    # Determine the output directory and file name
+    output_dir = os.path.dirname(csv_file_path)
+    output_filename = os.path.join(output_dir, f'{kernel}--{benchmark}-cpuusage.png')
+    
     plt.savefig(output_filename, bbox_inches='tight')
     logging.info(f"Heatmap saved to {output_filename}")
     plt.close()
@@ -113,11 +118,11 @@ def process_csv_to_heatmap(filename: str) -> None:
     logging.info(f"Processing file: {filename}")
     kernel, benchmark = parse_filename(filename)
     df, num_cpus = load_and_process_csv(filename)
-    plot_heatmap(df, num_cpus, kernel, benchmark)
+    plot_heatmap(df, num_cpus, kernel, benchmark, filename)
 
 def find_csv_files(directory: str) -> List[str]:
     """
-    Finds all CSV files in a given directory (not including subdirectories).
+    Finds all CSV files in a given directory and its subdirectories.
     
     Args:
     directory (str): The directory to search for CSV files.
@@ -127,13 +132,15 @@ def find_csv_files(directory: str) -> List[str]:
     """
     assert isinstance(directory, str), "Directory path must be a string"
     
+    csv_files = []
     try:
-        csv_files = [
-            os.path.join(directory, file)
-            for file in os.listdir(directory)
-            if file.endswith('-cpuusage.csv') and os.path.isfile(os.path.join(directory, file))
-        ]
-        logging.debug(f"Found {len(csv_files)} CSV files in directory: {directory}")
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if file.endswith('-cpuusage.csv'):
+                    file_path = os.path.join(root, file)
+                    if os.path.isfile(file_path):
+                        csv_files.append(file_path)
+        logging.debug(f"Found {len(csv_files)} CSV files in directory and its subdirectories: {directory}")
     except Exception as e:
         logging.error(f"Error finding CSV files in directory {directory}: {e}")
         raise
